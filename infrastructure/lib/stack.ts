@@ -1,13 +1,26 @@
-import * as cdk from 'aws-cdk-lib';
-import * as lambda from 'aws-cdk-lib/aws-lambda';
-import * as apigateway from 'aws-cdk-lib/aws-apigateway';
-import * as s3 from 'aws-cdk-lib/aws-s3';
-import * as cloudfront from 'aws-cdk-lib/aws-cloudfront';
-import * as origins from 'aws-cdk-lib/aws-cloudfront-origins';
-import * as iam from 'aws-cdk-lib/aws-iam';
-import * as logs from 'aws-cdk-lib/aws-logs';
-import { Construct } from 'constructs';
-import * as path from 'path';
+import * as cdk from "aws-cdk-lib";
+import { Construct } from "constructs";
+
+import * as s3 from "aws-cdk-lib/aws-s3";
+import * as cloudfront from "aws-cdk-lib/aws-cloudfront";
+import * as origins from "aws-cdk-lib/aws-cloudfront-origins";
+
+import * as apigateway from "aws-cdk-lib/aws-apigateway";
+import * as lambda from "aws-cdk-lib/aws-lambda";
+import { NodejsFunction } from "aws-cdk-lib/aws-lambda-nodejs";
+
+import * as path from "path";
+import * as fs from "fs";
+import * as dotenv from "dotenv";
+
+// Load environment variables from .env.local file
+const envPath = path.join(__dirname, "../../.env.local");
+if (fs.existsSync(envPath)) {
+  dotenv.config({ path: envPath });
+  console.log("✓ Loaded .env.local file for CDK deployment");
+} else {
+  console.warn("⚠️ .env.local file not found - using environment variables");
+}
 
 export interface ExpenseTrackerStackProps extends cdk.StackProps {
   mongodbUri: string;
@@ -18,143 +31,91 @@ export class ExpenseTrackerStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props: ExpenseTrackerStackProps) {
     super(scope, id, props);
 
-    // ===== BACKEND: Lambda + API Gateway =====
-
-    // Create Lambda execution role
-    const lambdaRole = new iam.Role(this, 'BackendLambdaRole', {
-      assumedBy: new iam.ServicePrincipal('lambda.amazonaws.com'),
-    });
-
-    // Add CloudWatch Logs permissions
-    lambdaRole.addManagedPolicy(iam.ManagedPolicy.fromAwsManagedPolicyName('service-role/AWSLambdaBasicExecutionRole'));
-
-    // Create Lambda function for backend API
-    const backendLambda = new lambda.Function(this, 'BackendLambda', {
+    // Backend Lambda with proper bundling - esbuild will bundle all dependencies
+    const backendLambda = new NodejsFunction(this, "BackendLambda", {
+      entry: path.join(__dirname, "../../apps/backend/src/lambda.ts"),
+      handler: "handler",
       runtime: lambda.Runtime.NODEJS_20_X,
-      handler: 'dist/lambda.handler',
-      code: lambda.Code.fromAsset(path.join(__dirname, '../../apps/backend'), {
-        bundling: {
-          image: lambda.Runtime.NODEJS_20_X.bundlingImage,
-          command: [
-            'bash',
-            '-c',
-            [
-              'npm install -g pnpm',
-              'pnpm install',
-              'pnpm run build',
-              'cp -r dist /asset-output/',
-              'cp -r node_modules /asset-output/',
-            ].join(' && '),
-          ],
-        },
-      }),
-      role: lambdaRole,
-      timeout: cdk.Duration.seconds(30),
+      timeout: cdk.Duration.seconds(60),
       memorySize: 512,
       environment: {
         MONGODB_URI: props.mongodbUri,
         JWT_SECRET: props.jwtSecret,
-        NODE_ENV: 'production',
+        NODE_ENV: "production",
+        DEPLOY_TIME: new Date().toISOString(),
       },
-      logRetention: logs.RetentionDays.ONE_WEEK,
+      bundling: {
+        // Don't minify to help with debugging
+        minify: false,
+        // Don't exclude any modules - let esbuild bundle everything
+        externalModules: [],
+        // Target the exact Node version
+        target: "node20",
+        // Include source maps for debugging
+        sourceMap: false,
+        keepNames: true,
+      },
     });
 
-    // Create API Gateway REST API
-    const api = new apigateway.RestApi(this, 'ExpenseTrackerApi', {
-      restApiName: 'Expense Tracker API',
-      description: 'API for Personal Expense Tracker',
+    // API Gateway → Lambda
+    const api = new apigateway.RestApi(this, "ExpenseTrackerApi", {
+      restApiName: "Expense Tracker API",
       defaultCorsPreflightOptions: {
         allowOrigins: apigateway.Cors.ALL_ORIGINS,
         allowMethods: apigateway.Cors.ALL_METHODS,
-        allowHeaders: ['Content-Type', 'Authorization'],
+        allowHeaders: ["Content-Type", "Authorization"],
       },
-      endpointExport: new cdk.CfnOutput(this, 'ApiEndpoint', {
-        value: 'https://{id}.execute-api.{region}.amazonaws.com/prod',
-        description: 'API Gateway endpoint (replace {id} and {region})',
-      }),
     });
 
-    // Add Lambda integration to API Gateway
-    const lambdaIntegration = new apigateway.LambdaIntegration(backendLambda);
-    const proxyResource = api.root.addResource('{proxy+}');
-    proxyResource.addMethod('ANY', lambdaIntegration);
+    api.root.addProxy({
+      defaultIntegration: new apigateway.LambdaIntegration(backendLambda),
+      anyMethod: true,
+    });
 
-    // ===== FRONTEND: S3 + CloudFront =====
-
-    // Create S3 bucket for frontend
-    const frontendBucket = new s3.Bucket(this, 'FrontendBucket', {
-      versioned: true,
+    // S3 Bucket for Frontend
+    const frontendBucket = new s3.Bucket(this, "FrontendBucket", {
+      websiteIndexDocument: "index.html",
+      websiteErrorDocument: "index.html",
       removalPolicy: cdk.RemovalPolicy.DESTROY,
       autoDeleteObjects: true,
-      websiteIndexDocument: 'index.html',
-      websiteErrorDocument: 'index.html', // SPA routing
-      blockPublicAccess: s3.BlockPublicAccess.BLOCK_ACLS,
-      encryption: s3.BucketEncryption.S3_MANAGED,
     });
 
-    // Create CloudFront distribution
-    const distribution = new cloudfront.Distribution(this, 'FrontendDistribution', {
-      defaultBehavior: {
-        origin: new origins.S3Origin(frontendBucket),
-        viewerProtocolPolicy: cloudfront.ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
-        cachePolicy: cloudfront.CachePolicy.CACHING_OPTIMIZED,
-        compress: true,
-      },
-      additionalBehaviors: {
-        '/*': {
+    // CloudFront for SPA hosting
+    const distribution = new cloudfront.Distribution(
+      this,
+      "FrontendDistribution",
+      {
+        defaultBehavior: {
           origin: new origins.S3Origin(frontendBucket),
-          viewerProtocolPolicy: cloudfront.ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
-          cachePolicy: new cloudfront.CachePolicy(this, 'SPACachePolicy', {
-            defaultTtl: cdk.Duration.seconds(0),
-            maxTtl: cdk.Duration.seconds(0),
-            minTtl: cdk.Duration.seconds(0),
-          }),
-          compress: true,
+          viewerProtocolPolicy:
+            cloudfront.ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
         },
-      },
-      defaultRootObject: 'index.html',
-      minimumProtocolVersion: cloudfront.SecurityPolicyProtocol.TLS_V1_2_2021_06,
-    });
+        defaultRootObject: "index.html",
+      }
+    );
 
-    // Allow CloudFront to read from S3 bucket
-    frontendBucket.grantRead(distribution.grantPrincipal);
-
-    // ===== OUTPUTS =====
-
-    new cdk.CfnOutput(this, 'BackendLambdaArn', {
-      value: backendLambda.functionArn,
-      description: 'Backend Lambda function ARN',
-    });
-
-    new cdk.CfnOutput(this, 'ApiGatewayUrl', {
+    // Outputs
+    new cdk.CfnOutput(this, "ApiGatewayUrl", {
       value: api.url,
-      description: 'API Gateway endpoint URL',
     });
 
-    new cdk.CfnOutput(this, 'FrontendBucketName', {
+    new cdk.CfnOutput(this, "CloudFrontUrl", {
+      value: `https://${distribution.domainName}`,
+    });
+
+    new cdk.CfnOutput(this, "FrontendBucketName", {
       value: frontendBucket.bucketName,
-      description: 'S3 bucket for frontend hosting',
-    });
-
-    new cdk.CfnOutput(this, 'CloudFrontDistributionUrl', {
-      value: `https://${distribution.distributionDomainName}`,
-      description: 'CloudFront distribution URL (frontend)',
-    });
-
-    new cdk.CfnOutput(this, 'CloudFrontDistributionId', {
-      value: distribution.distributionId,
-      description: 'CloudFront distribution ID',
     });
   }
 }
 
 const app = new cdk.App();
 
-new ExpenseTrackerStack(app, 'ExpenseTrackerStack', {
-  mongodbUri: process.env.MONGODB_URI || '',
-  jwtSecret: process.env.JWT_SECRET || '',
+new ExpenseTrackerStack(app, "ExpenseTrackerStack", {
+  mongodbUri: process.env.MONGODB_URI || "",
+  jwtSecret: process.env.JWT_SECRET || "",
   env: {
     account: process.env.CDK_DEFAULT_ACCOUNT,
-    region: process.env.CDK_DEFAULT_REGION || 'us-east-1',
+    region: process.env.CDK_DEFAULT_REGION || "us-east-1",
   },
 });
