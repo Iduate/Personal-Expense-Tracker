@@ -1,5 +1,13 @@
 import * as cdk from 'aws-cdk-lib';
+import * as lambda from 'aws-cdk-lib/aws-lambda';
+import * as apigateway from 'aws-cdk-lib/aws-apigateway';
+import * as s3 from 'aws-cdk-lib/aws-s3';
+import * as cloudfront from 'aws-cdk-lib/aws-cloudfront';
+import * as origins from 'aws-cdk-lib/aws-cloudfront-origins';
+import * as iam from 'aws-cdk-lib/aws-iam';
+import * as logs from 'aws-cdk-lib/aws-logs';
 import { Construct } from 'constructs';
+import * as path from 'path';
 
 export interface ExpenseTrackerStackProps extends cdk.StackProps {
   mongodbUri: string;
@@ -10,22 +18,132 @@ export class ExpenseTrackerStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props: ExpenseTrackerStackProps) {
     super(scope, id, props);
 
-    // Note: This is a basic CDK configuration
-    // Full implementation requires:
-    // - Lambda functions (backend)
-    // - API Gateway (REST API)
-    // - S3 bucket (frontend hosting)
-    // - CloudFront distribution (CDN)
-    // - Environment variables management
+    // ===== BACKEND: Lambda + API Gateway =====
 
-    const apiUrl = new cdk.CfnOutput(this, 'ApiUrl', {
-      value: 'https://api.example.com',
-      description: 'API Gateway URL',
+    // Create Lambda execution role
+    const lambdaRole = new iam.Role(this, 'BackendLambdaRole', {
+      assumedBy: new iam.ServicePrincipal('lambda.amazonaws.com'),
     });
 
-    const frontendUrl = new cdk.CfnOutput(this, 'FrontendUrl', {
-      value: 'https://expense-tracker.example.com',
-      description: 'Frontend CloudFront URL',
+    // Add CloudWatch Logs permissions
+    lambdaRole.addManagedPolicy(iam.ManagedPolicy.fromAwsManagedPolicyName('service-role/AWSLambdaBasicExecutionRole'));
+
+    // Create Lambda function for backend API
+    const backendLambda = new lambda.Function(this, 'BackendLambda', {
+      runtime: lambda.Runtime.NODEJS_20_X,
+      handler: 'dist/lambda.handler',
+      code: lambda.Code.fromAsset(path.join(__dirname, '../../apps/backend'), {
+        bundling: {
+          image: lambda.Runtime.NODEJS_20_X.bundlingImage,
+          command: [
+            'bash',
+            '-c',
+            [
+              'npm install -g pnpm',
+              'pnpm install',
+              'pnpm run build',
+              'cp -r dist /asset-output/',
+              'cp -r node_modules /asset-output/',
+            ].join(' && '),
+          ],
+        },
+      }),
+      role: lambdaRole,
+      timeout: cdk.Duration.seconds(30),
+      memorySize: 512,
+      environment: {
+        MONGODB_URI: props.mongodbUri,
+        JWT_SECRET: props.jwtSecret,
+        NODE_ENV: 'production',
+      },
+      logRetention: logs.RetentionDays.ONE_WEEK,
+    });
+
+    // Create API Gateway REST API
+    const api = new apigateway.RestApi(this, 'ExpenseTrackerApi', {
+      restApiName: 'Expense Tracker API',
+      description: 'API for Personal Expense Tracker',
+      defaultCorsPreflightOptions: {
+        allowOrigins: apigateway.Cors.ALL_ORIGINS,
+        allowMethods: apigateway.Cors.ALL_METHODS,
+        allowHeaders: ['Content-Type', 'Authorization'],
+      },
+      endpointExport: new cdk.CfnOutput(this, 'ApiEndpoint', {
+        value: 'https://{id}.execute-api.{region}.amazonaws.com/prod',
+        description: 'API Gateway endpoint (replace {id} and {region})',
+      }),
+    });
+
+    // Add Lambda integration to API Gateway
+    const lambdaIntegration = new apigateway.LambdaIntegration(backendLambda);
+    const proxyResource = api.root.addResource('{proxy+}');
+    proxyResource.addMethod('ANY', lambdaIntegration);
+
+    // ===== FRONTEND: S3 + CloudFront =====
+
+    // Create S3 bucket for frontend
+    const frontendBucket = new s3.Bucket(this, 'FrontendBucket', {
+      versioned: true,
+      removalPolicy: cdk.RemovalPolicy.DESTROY,
+      autoDeleteObjects: true,
+      websiteIndexDocument: 'index.html',
+      websiteErrorDocument: 'index.html', // SPA routing
+      blockPublicAccess: s3.BlockPublicAccess.BLOCK_ACLS,
+      encryption: s3.BucketEncryption.S3_MANAGED,
+    });
+
+    // Create CloudFront distribution
+    const distribution = new cloudfront.Distribution(this, 'FrontendDistribution', {
+      defaultBehavior: {
+        origin: new origins.S3Origin(frontendBucket),
+        viewerProtocolPolicy: cloudfront.ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
+        cachePolicy: cloudfront.CachePolicy.CACHING_OPTIMIZED,
+        compress: true,
+      },
+      additionalBehaviors: {
+        '/*': {
+          origin: new origins.S3Origin(frontendBucket),
+          viewerProtocolPolicy: cloudfront.ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
+          cachePolicy: new cloudfront.CachePolicy(this, 'SPACachePolicy', {
+            defaultTtl: cdk.Duration.seconds(0),
+            maxTtl: cdk.Duration.seconds(0),
+            minTtl: cdk.Duration.seconds(0),
+          }),
+          compress: true,
+        },
+      },
+      defaultRootObject: 'index.html',
+      minimumProtocolVersion: cloudfront.SecurityPolicyProtocol.TLS_V1_2_2021_06,
+    });
+
+    // Allow CloudFront to read from S3 bucket
+    frontendBucket.grantRead(distribution.grantPrincipal);
+
+    // ===== OUTPUTS =====
+
+    new cdk.CfnOutput(this, 'BackendLambdaArn', {
+      value: backendLambda.functionArn,
+      description: 'Backend Lambda function ARN',
+    });
+
+    new cdk.CfnOutput(this, 'ApiGatewayUrl', {
+      value: api.url,
+      description: 'API Gateway endpoint URL',
+    });
+
+    new cdk.CfnOutput(this, 'FrontendBucketName', {
+      value: frontendBucket.bucketName,
+      description: 'S3 bucket for frontend hosting',
+    });
+
+    new cdk.CfnOutput(this, 'CloudFrontDistributionUrl', {
+      value: `https://${distribution.distributionDomainName}`,
+      description: 'CloudFront distribution URL (frontend)',
+    });
+
+    new cdk.CfnOutput(this, 'CloudFrontDistributionId', {
+      value: distribution.distributionId,
+      description: 'CloudFront distribution ID',
     });
   }
 }
@@ -37,6 +155,6 @@ new ExpenseTrackerStack(app, 'ExpenseTrackerStack', {
   jwtSecret: process.env.JWT_SECRET || '',
   env: {
     account: process.env.CDK_DEFAULT_ACCOUNT,
-    region: process.env.CDK_DEFAULT_REGION,
+    region: process.env.CDK_DEFAULT_REGION || 'us-east-1',
   },
 });

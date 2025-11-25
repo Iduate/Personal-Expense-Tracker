@@ -1,0 +1,114 @@
+name: Deploy to AWS
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v2
+        with:
+          version: 8
+
+      - name: Get pnpm store directory
+        shell: bash
+        run: |
+          echo "STORE_PATH=$(pnpm store path --silent)" >> $GITHUB_ENV
+
+      - name: Setup pnpm cache
+        uses: actions/cache@v3
+        with:
+          path: ${{ env.STORE_PATH }}
+          key: ${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-store-
+
+      - name: Install dependencies
+        run: pnpm install
+
+      - name: Build backend
+        run: cd apps/backend && npm run build && cd ../..
+
+      - name: Build frontend
+        run: cd apps/frontend && npm run build && cd ../..
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/GitHubActionsRole
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Install CDK
+        run: npm install -g aws-cdk
+
+      - name: Bootstrap CDK
+        run: |
+          cd infrastructure
+          cdk bootstrap --profile default
+          cd ..
+        env:
+          AWS_ACCOUNT: ${{ secrets.AWS_ACCOUNT_ID }}
+          AWS_REGION: ${{ secrets.AWS_REGION }}
+
+      - name: Deploy infrastructure
+        run: |
+          cd infrastructure
+          cdk deploy --require-approval=never
+          cd ..
+        env:
+          MONGODB_URI: ${{ secrets.MONGODB_URI }}
+          JWT_SECRET: ${{ secrets.JWT_SECRET }}
+          CDK_DEFAULT_ACCOUNT: ${{ secrets.AWS_ACCOUNT_ID }}
+          CDK_DEFAULT_REGION: ${{ secrets.AWS_REGION }}
+
+      - name: Get S3 bucket and CloudFront info
+        id: aws-info
+        run: |
+          BUCKET=$(aws cloudformation describe-stacks \
+            --stack-name ExpenseTrackerStack \
+            --query 'Stacks[0].Outputs[?OutputKey==`FrontendBucketName`].OutputValue' \
+            --output text)
+          DIST_ID=$(aws cloudformation describe-stacks \
+            --stack-name ExpenseTrackerStack \
+            --query 'Stacks[0].Outputs[?OutputKey==`CloudFrontDistributionId`].OutputValue' \
+            --output text)
+          echo "bucket=$BUCKET" >> $GITHUB_OUTPUT
+          echo "dist_id=$DIST_ID" >> $GITHUB_OUTPUT
+
+      - name: Deploy frontend to S3
+        run: |
+          aws s3 sync apps/frontend/dist/ s3://${{ steps.aws-info.outputs.bucket }} --delete
+
+      - name: Invalidate CloudFront cache
+        run: |
+          aws cloudfront create-invalidation \
+            --distribution-id ${{ steps.aws-info.outputs.dist_id }} \
+            --paths "/*"
+
+      - name: Create deployment summary
+        run: |
+          echo "## Deployment Summary" >> $GITHUB_STEP_SUMMARY
+          echo "✅ Backend deployed to AWS Lambda" >> $GITHUB_STEP_SUMMARY
+          echo "✅ Frontend deployed to S3 + CloudFront" >> $GITHUB_STEP_SUMMARY
+          echo "✅ Database: MongoDB Atlas" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Infrastructure" >> $GITHUB_STEP_SUMMARY
+          echo "- Lambda: ExpenseTrackerStack-BackendLambda" >> $GITHUB_STEP_SUMMARY
+          echo "- API Gateway: Expense Tracker API" >> $GITHUB_STEP_SUMMARY
+          echo "- S3 Bucket: ${{ steps.aws-info.outputs.bucket }}" >> $GITHUB_STEP_SUMMARY
+          echo "- CloudFront Distribution: ${{ steps.aws-info.outputs.dist_id }}" >> $GITHUB_STEP_SUMMARY

@@ -4,7 +4,8 @@
   "scripts": {
     "build": "tsc",
     "cdk": "cdk",
-    "cdk:deploy": "cdk deploy",
+    "cdk:bootstrap": "cdk bootstrap",
+    "cdk:deploy": "cdk deploy --require-approval=never",
     "cdk:destroy": "cdk destroy",
     "type-check": "tsc --noEmit"
   },
@@ -12,6 +13,10 @@
     "aws-cdk-lib": "^2.115.0",
     "constructs": "^10.3.0",
     "typescript": "^5.3.3",
-    "@types/node": "^20.10.4"
+    "@types/node": "^20.10.4",
+    "aws-cdk": "^2.115.0"
+  },
+  "dependencies": {
+    "aws-lambda": "^1.0.7"
   }
 }
