@@ -1,0 +1,17 @@
+{
+  "name": "@expense-tracker/infrastructure",
+  "version": "1.0.0",
+  "scripts": {
+    "build": "tsc",
+    "cdk": "cdk",
+    "cdk:deploy": "cdk deploy",
+    "cdk:destroy": "cdk destroy",
+    "type-check": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "aws-cdk-lib": "^2.115.0",
+    "constructs": "^10.3.0",
+    "typescript": "^5.3.3",
+    "@types/node": "^20.10.4"
+  }
+}

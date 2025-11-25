@@ -1,0 +1,22 @@
+{
+  "name": "expense-tracker-monorepo",
+  "version": "1.0.0",
+  "description": "Personal Expense Tracker - Full Stack Application",
+  "private": true,
+  "scripts": {
+    "install-all": "pnpm install",
+    "build": "pnpm run -r build",
+    "dev": "pnpm run -r --parallel dev",
+    "test": "pnpm run -r test",
+    "lint": "pnpm run -r lint",
+    "type-check": "pnpm run -r type-check",
+    "format": "pnpm run -r format"
+  },
+  "devDependencies": {
+    "typescript": "^5.3.3"
+  },
+  "engines": {
+    "node": ">=20.0.0",
+    "pnpm": ">=8.0.0"
+  }
+}
