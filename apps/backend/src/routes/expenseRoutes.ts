@@ -1,7 +1,11 @@
 import { Router } from 'express';
 import { expenseController } from '../controllers';
+import { authMiddleware } from '../middleware';
 
 const router = Router();
+
+// Apply auth middleware to all routes
+router.use(authMiddleware);
 
 router.post('/', expenseController.create);
 router.get('/', expenseController.list);

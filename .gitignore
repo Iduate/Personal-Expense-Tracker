@@ -38,3 +38,6 @@ coverage/
 
 # CDK
 cdk.out/
+
+# GitHub
+.github/

@@ -1,5 +1,5 @@
 import React from 'react';
-import { PieChart, Pie, Cell, Legend, Tooltip, ResponsiveContainer } from 'recharts';
+import { PieChart, Pie, Cell, Legend, Tooltip as RechartsTooltip, ResponsiveContainer } from 'recharts';
 import { Box, Heading } from '@chakra-ui/react';
 import type { SpendingByCategory } from '@shared/types';
 
@@ -37,7 +37,7 @@ export const SpendingChart: React.FC<SpendingChartProps> = ({ data }: SpendingCh
               <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
             ))}
           </Pie>
-          <Tooltip formatter={(value: any) => `$${value.toFixed(2)}`} />
+          <RechartsTooltip formatter={(value: any) => `$${value.toFixed(2)}`} />
           <Legend />
         </PieChart>
       </ResponsiveContainer>

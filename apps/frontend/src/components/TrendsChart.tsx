@@ -1,5 +1,5 @@
 import React from 'react';
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, Legend, ResponsiveContainer } from 'recharts';
 import { Box, Heading } from '@chakra-ui/react';
 
 interface TrendData {
@@ -28,7 +28,7 @@ export const TrendsChart: React.FC<TrendsChartProps> = ({ data }: TrendsChartPro
           <CartesianGrid strokeDasharray="3 3" />
           <XAxis dataKey="month" />
           <YAxis />
-          <Tooltip formatter={(value: any) => `$${value.toFixed(2)}`} />
+          <RechartsTooltip formatter={(value: any) => `$${value.toFixed(2)}`} />
           <Legend />
           <Line type="monotone" dataKey="total" stroke="#8884d8" name="Monthly Spending" />
         </LineChart>

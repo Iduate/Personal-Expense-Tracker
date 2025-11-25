@@ -1,9 +1,15 @@
 import type { Expense } from '@expense-tracker/shared';
-import { ExpenseModel } from '../models';
 import { validateAmount } from '@expense-tracker/shared';
+
+// Lazy load models to avoid initialization issues in Lambda
+const getExpenseModel = async () => {
+  const { ExpenseModel } = await import('../models');
+  return ExpenseModel;
+};
 
 export const expenseService = {
   async createExpense(userId: string, expenseData: Omit<Expense, '_id' | 'userId' | 'createdAt' | 'updatedAt'>): Promise<Expense> {
+    const ExpenseModel = await getExpenseModel();
     if (!validateAmount(expenseData.amount)) {
       throw new Error('Invalid amount');
     }
@@ -17,6 +23,7 @@ export const expenseService = {
   },
 
   async getExpenses(userId: string, filters?: { startDate?: string; endDate?: string; category?: string }): Promise<Expense[]> {
+    const ExpenseModel = await getExpenseModel();
     const query: Record<string, any> = { userId };
 
     if (filters?.startDate || filters?.endDate) {
@@ -34,6 +41,7 @@ export const expenseService = {
   },
 
   async updateExpense(userId: string, expenseId: string, updates: Partial<Omit<Expense, '_id' | 'userId'>>): Promise<Expense> {
+    const ExpenseModel = await getExpenseModel();
     if (updates.amount && !validateAmount(updates.amount)) {
       throw new Error('Invalid amount');
     }
@@ -52,6 +60,7 @@ export const expenseService = {
   },
 
   async deleteExpense(userId: string, expenseId: string): Promise<void> {
+    const ExpenseModel = await getExpenseModel();
     const result = await ExpenseModel.deleteOne({ _id: expenseId, userId });
 
     if (result.deletedCount === 0) {
@@ -60,6 +69,7 @@ export const expenseService = {
   },
 
   async getMonthlySummary(userId: string, month?: string): Promise<Record<string, any>> {
+    const ExpenseModel = await getExpenseModel();
     const matchStage: Record<string, any> = { userId };
 
     if (month) {
@@ -98,6 +108,7 @@ export const expenseService = {
   },
 
   async getSpendingByCategory(userId: string): Promise<Array<{ category: string; total: number }>> {
+    const ExpenseModel = await getExpenseModel();
     const result = await ExpenseModel.aggregate([
       { $match: { userId } },
       {
@@ -120,6 +131,7 @@ export const expenseService = {
   },
 
   async getMonthlyTrends(userId: string): Promise<Array<{ month: string; total: number }>> {
+    const ExpenseModel = await getExpenseModel();
     const result = await ExpenseModel.aggregate([
       { $match: { userId } },
       {

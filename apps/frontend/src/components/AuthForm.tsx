@@ -17,9 +17,10 @@ import { useAuthStore } from '../store/authStore';
 interface AuthFormProps {
   onSuccess: () => void;
   isLogin?: boolean;
+  onToggleMode?: () => void;
 }
 
-export const AuthForm: React.FC<AuthFormProps> = ({ onSuccess, isLogin = false }: AuthFormProps) => {
+export const AuthForm: React.FC<AuthFormProps> = ({ onSuccess, isLogin = false, onToggleMode }: AuthFormProps) => {
   const [email, setEmail] = React.useState('');
   const [password, setPassword] = React.useState('');
   const [loading, setLoading] = React.useState(false);
@@ -89,7 +90,9 @@ export const AuthForm: React.FC<AuthFormProps> = ({ onSuccess, isLogin = false }
 
           <Text fontSize="sm" textAlign="center">
             {isLogin ? "Don't have an account? " : 'Already have an account? '}
-            <ChakraLink color="blue.500">{isLogin ? 'Sign Up' : 'Login'}</ChakraLink>
+            <ChakraLink color="blue.500" onClick={onToggleMode} cursor="pointer">
+              {isLogin ? 'Sign Up' : 'Login'}
+            </ChakraLink>
           </Text>
         </VStack>
       </form>

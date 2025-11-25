@@ -1,6 +1,6 @@
 import type { AuthResponse, Expense, CustomCategory, MonthlySummary, SpendingByCategory } from '@shared/types';
 
-const API_URL: string = 'http://localhost:3001/api';
+const API_URL: string = process.env.VITE_API_URL || 'https://fpmdy194nh.execute-api.us-east-1.amazonaws.com/prod';
 
 const getHeaders = (token?: string): Record<string, string> => {
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };

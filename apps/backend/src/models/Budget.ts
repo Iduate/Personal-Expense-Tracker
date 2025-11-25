@@ -1,5 +1,4 @@
 import { Schema, model } from 'mongoose';
-import type { CustomCategory } from '@shared/types';
 
 export interface BudgetDoc {
   userId: string;

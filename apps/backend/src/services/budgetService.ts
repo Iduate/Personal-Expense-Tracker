@@ -1,7 +1,12 @@
-import { Budget } from '../models';
+// Lazy load models to avoid initialization issues in Lambda
+const getBudgetModel = async () => {
+  const { Budget } = await import('../models');
+  return Budget;
+};
 
 export const budgetService = {
   async createBudget(userId: string, category: string, limit: number, alert_threshold: number = 80) {
+    const Budget = await getBudgetModel();
     const budget = await Budget.create({
       userId,
       category,
@@ -12,16 +17,19 @@ export const budgetService = {
   },
 
   async getBudgets(userId: string) {
+    const Budget = await getBudgetModel();
     const budgets = await Budget.find({ userId });
     return budgets.map((b: any) => b.toObject());
   },
 
   async getBudgetByCategory(userId: string, category: string) {
+    const Budget = await getBudgetModel();
     const budget = await Budget.findOne({ userId, category });
     return budget ? budget.toObject() : null;
   },
 
   async updateBudget(userId: string, category: string, limit?: number, alert_threshold?: number) {
+    const Budget = await getBudgetModel();
     const budget = await Budget.findOneAndUpdate(
       { userId, category },
       { ...(limit !== undefined && { limit }), ...(alert_threshold !== undefined && { alert_threshold }) },
@@ -31,6 +39,7 @@ export const budgetService = {
   },
 
   async deleteBudget(userId: string, category: string) {
+    const Budget = await getBudgetModel();
     await Budget.deleteOne({ userId, category });
   },
 

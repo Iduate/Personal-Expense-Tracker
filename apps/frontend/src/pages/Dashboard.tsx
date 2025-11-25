@@ -16,6 +16,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onLogout }: DashboardProps
   const [trends, setTrends] = React.useState<Array<{ month: string; total: number }>>([]);
   const [editingExpense, setEditingExpense] = React.useState<Expense | null>(null);
   const [loading, setLoading] = React.useState(true);
+  const [activeTab, setActiveTab] = React.useState(0);
   const token = useAuthStore((state: any) => state.token)!;
   const email = useAuthStore((state: any) => state.email);
 
@@ -74,7 +75,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onLogout }: DashboardProps
         </Button>
       </HStack>
 
-      <Tabs>
+      <Tabs index={activeTab} onChange={setActiveTab}>
         <TabList>
           <Tab>Add Expense</Tab>
           <Tab>Expenses</Tab>
@@ -119,7 +120,10 @@ export const Dashboard: React.FC<DashboardProps> = ({ onLogout }: DashboardProps
                       key={expense._id}
                       expense={expense}
                       onDelete={() => loadData()}
-                      onEdit={setEditingExpense}
+                      onEdit={(expense) => {
+                        setActiveTab(0);
+                        setEditingExpense(expense);
+                      }}
                     />
                   ))
                 )}
